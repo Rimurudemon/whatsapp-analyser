@@ -1,5 +1,5 @@
 plotly
 matplotlib
-ntlk
+nltk
 wordcloud
 emoji
