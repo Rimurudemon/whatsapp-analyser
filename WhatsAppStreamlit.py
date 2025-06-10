@@ -11,6 +11,9 @@ import nltk
 from nltk.corpus import stopwords
 from wordcloud import WordCloud
 import emoji
+from textblob import TextBlob
+from textblob.sentiments import NaiveBayesAnalyzer
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from collections import Counter
 
 # Set page configuration
@@ -23,6 +26,21 @@ def download_nltk_resources():
         nltk.data.find('corpora/stopwords')
     except LookupError:
         nltk.download('stopwords')
+    
+    try:
+        nltk.data.find('sentiment/vader_lexicon')
+    except LookupError:
+        nltk.download('vader_lexicon')
+    
+    try:
+        nltk.data.find('corpora/movie_reviews')
+    except LookupError:
+        nltk.download('movie_reviews')
+    
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        nltk.download('punkt')
 
 download_nltk_resources()
 
@@ -233,6 +251,195 @@ def analyze_media(df):
         'media_per_user': media_per_user
     }
 
+def sentiment_analysis(text, method="combined"):
+    """
+    Perform sentiment analysis on a given text using multiple methods
+    
+    Parameters:
+    text (str): Text to analyze
+    method (str): Method to use ('textblob', 'vader', or 'combined')
+    
+    Returns:
+    float: Sentiment polarity score (-1 to 1)
+    """
+    if not isinstance(text, str) or not text.strip():
+        return 0.0
+    
+    # Clean the text by removing URLs, media references and emojis
+    text = re.sub(r'https?://\S+|www\.\S+|<Media omitted>|image omitted|video omitted|audio omitted|document omitted', '', text)
+    
+    if method == "textblob":
+        # TextBlob analysis
+        blob = TextBlob(text)
+        return blob.sentiment.polarity
+    
+    elif method == "vader":
+        # VADER analysis
+        analyzer = SentimentIntensityAnalyzer()
+        scores = analyzer.polarity_scores(text)
+        return scores['compound']  # Compound score ranges from -1 to 1
+    
+    else:  # combined (default)
+        # Use both and average the results (normalized to -1 to 1 scale)
+        blob = TextBlob(text)
+        textblob_score = blob.sentiment.polarity
+        
+        analyzer = SentimentIntensityAnalyzer()
+        vader_score = analyzer.polarity_scores(text)['compound']
+        
+        # Average the two scores, giving slightly more weight to VADER
+        return (textblob_score + vader_score * 1.5) / 2.5
+
+def categorize_sentiment(score):
+    """
+    Categorize sentiment scores into Positive, Negative, or Neutral
+    
+    Parameters:
+    score (float): Sentiment score between -1 and 1
+    
+    Returns:
+    str: Sentiment category
+    """
+    if score > 0.15:
+        return 'Positive'
+    elif score < -0.1:
+        return 'Negative'
+    else:
+        return 'Neutral'
+
+def emotion_detection(text):
+    """
+    Detect emotion in text (basic implementation)
+    
+    Parameters:
+    text (str): Text to analyze
+    
+    Returns:
+    str: Detected emotion
+    """
+    if not isinstance(text, str) or not text.strip():
+        return 'Neutral'
+        
+    # Define emotion keywords
+    emotion_keywords = {
+        'Joy': ['happy', 'joy', 'delighted', 'pleased', 'glad', 'cheerful', 'exciting', 'exciting', '😊', '😃', '😄', '❤️', '♥️'],
+        'Anger': ['angry', 'furious', 'irritated', 'annoyed', 'mad', 'frustrate', 'rage', '😠', '😡', '🤬'],
+        'Sadness': ['sad', 'depressed', 'unhappy', 'miserable', 'heartbroken', 'disappointed', 'upset', '😢', '😭', '😔', '😞', '💔'],
+        'Fear': ['afraid', 'scared', 'terrified', 'anxious', 'worried', 'nervous', 'horror', '😨', '😱', '😰'],
+        'Surprise': ['surprised', 'amazed', 'astonished', 'shocked', 'unexpected', 'wow', '😮', '😲', '😯']
+    }
+    
+    # Convert text to lowercase for case-insensitive matching
+    text_lower = text.lower()
+    
+    # Count occurrences of emotion keywords
+    emotion_counts = {}
+    for emotion, keywords in emotion_keywords.items():
+        count = sum(1 for keyword in keywords if keyword.lower() in text_lower)
+        emotion_counts[emotion] = count
+    
+    # Get the dominant emotion (if any)
+    max_emotion = max(emotion_counts.items(), key=lambda x: x[1])
+    
+    # If no emotion detected, use sentiment analysis for basic categorization
+    if max_emotion[1] == 0:
+        sentiment_score = sentiment_analysis(text)
+        if sentiment_score > 0.2:
+            return 'Joy'
+        elif sentiment_score < -0.2:
+            return 'Sadness'
+        else:
+            return 'Neutral'
+    
+    return max_emotion[0]
+
+# Function to analyze sentiment
+def analyze_sentiment(df, method="combined"):
+    """
+    Analyze sentiment in messages
+    
+    Parameters:
+    df (DataFrame): DataFrame with messages
+    method (str): Method to use for sentiment analysis
+    
+    Returns:
+    dict: Dictionary with sentiment analysis results
+    """
+    if len(df) == 0:
+        return {}
+    
+    # Add sentiment column
+    df_copy = df.copy()
+    df_copy['sentiment'] = df_copy['message'].apply(lambda x: sentiment_analysis(x, method))
+    df_copy['sentiment_category'] = df_copy['sentiment'].apply(categorize_sentiment)
+    df_copy['emotion'] = df_copy['message'].apply(emotion_detection)
+    
+    # Sentiment statistics
+    sentiment_stats = {
+        'average_sentiment': df_copy['sentiment'].mean(),
+        'sentiment_distribution': df_copy.groupby('sentiment_category').size().to_dict(),
+        'emotion_distribution': df_copy.groupby('emotion').size().to_dict()
+    }
+    
+    # Sentiment by user
+    user_sentiments = {}
+    for user in df_copy['author'].unique():
+        user_data = df_copy[df_copy['author'] == user]
+        user_sentiments[user] = {
+            'average': user_data['sentiment'].mean(),
+            'positive': (user_data['sentiment_category'] == 'Positive').sum() / len(user_data) * 100,
+            'negative': (user_data['sentiment_category'] == 'Negative').sum() / len(user_data) * 100,
+            'neutral': (user_data['sentiment_category'] == 'Neutral').sum() / len(user_data) * 100,
+            'most_common_emotion': user_data['emotion'].value_counts().idxmax()
+        }
+    
+    sentiment_stats['user_sentiments'] = user_sentiments
+    
+    return sentiment_stats
+
+def sentiment_time_frames(df, method="combined"):
+    """
+    Analyze sentiment time frames in messages
+    
+    Parameters:
+    df (DataFrame): DataFrame with messages
+    method (str): Method to use for sentiment analysis
+    
+    Returns:
+    DataFrame: Sentiment trends over time
+    """
+    if len(df) == 0:
+        return pd.DataFrame()
+    
+    # Create a copy to avoid modifying the original
+    df_copy = df.copy()
+    
+    # Calculate sentiment scores
+    df_copy['sentiment'] = df_copy['message'].apply(lambda x: sentiment_analysis(x, method))
+    df_copy['sentiment_category'] = df_copy['sentiment'].apply(categorize_sentiment)
+    
+    # Create a date column for grouping
+    df_copy['date'] = df_copy['date'].dt.date
+    
+    # Group by date and sentiment category
+    sentiment_over_time = df_copy.groupby(['date', 'sentiment_category']).size().unstack(fill_value=0)
+    
+    # Add a rolling average of sentiment
+    df_copy['date_dt'] = pd.to_datetime(df_copy['date'])
+    df_copy = df_copy.sort_values('date_dt')
+    df_copy['sentiment_rolling_avg'] = df_copy['sentiment'].rolling(window=20, min_periods=1).mean()
+    
+    # Group by date for average sentiment
+    avg_sentiment = df_copy.groupby('date')['sentiment'].mean().reset_index()
+    rolling_sentiment = df_copy.groupby('date')['sentiment_rolling_avg'].mean().reset_index()
+    
+    return {
+        'category_counts': sentiment_over_time,
+        'average_by_date': avg_sentiment,
+        'rolling_average': rolling_sentiment
+    }
+
+
 # Function to analyze emoji usage
 def analyze_emojis(df):
     """Analyze emoji usage in messages"""
@@ -404,8 +611,7 @@ def main():
             df_filtered = df[(df['date'] >= start_date) & (df['date'] <= end_date)]
         else:
             df_filtered = df
-        
-        # Create tabs for different analyses
+          # Create tabs for different analyses
         tabs = st.tabs([
             "Overview",
             "User Analysis",
@@ -413,7 +619,8 @@ def main():
             "User Comparison",
             "Word Clouds",
             "Media Analysis",
-            "Chat Patterns"  # Add Chat Patterns to the initial tabs list
+            "Sentiment Analysis",  # Add Sentiment Analysis tab
+            "Chat Patterns"
         ])
         
         # 1. Overview Tab
@@ -535,6 +742,41 @@ def main():
                 color_discrete_sequence=['#AB63FA']
             )
             st.plotly_chart(fig, use_container_width=True)
+              # Quick sentiment analysis for user
+            user_sentiment = analyze_sentiment(user_data)
+            if user_sentiment:
+                st.subheader(f"Sentiment Analysis for {selected_user}")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    avg_sentiment = user_sentiment['average_sentiment']
+                    sentiment_color = "normal"
+                    st.metric("Average Sentiment", f"{avg_sentiment:.2f}", delta=None, delta_color=sentiment_color)
+                
+                # Calculate percentages
+                total_msgs = sum(user_sentiment['sentiment_distribution'].values())
+                if total_msgs > 0:
+                    with col2:
+                        positive_pct = user_sentiment['sentiment_distribution'].get('Positive', 0) / total_msgs * 100
+                        st.metric("Positive Messages", f"{positive_pct:.1f}%")
+                    
+                    with col3:
+                        negative_pct = user_sentiment['sentiment_distribution'].get('Negative', 0) / total_msgs * 100
+                        st.metric("Negative Messages", f"{negative_pct:.1f}%")
+                
+                # Show common emotions if available
+                if user_sentiment.get('emotion_distribution'):
+                    top_emotions = sorted(user_sentiment['emotion_distribution'].items(), key=lambda x: x[1], reverse=True)[:3]
+                    if top_emotions:
+                        emotion_df = pd.DataFrame(top_emotions, columns=['Emotion', 'Count'])
+                        fig = px.pie(
+                            emotion_df,
+                            values='Count',
+                            names='Emotion',
+                            title=f"Top Emotions for {selected_user}",
+                            hole=0.4
+                        )
+                        st.plotly_chart(fig, use_container_width=True)
             
             # Emoji analysis for user
             emoji_stats = analyze_emojis(user_data)
@@ -795,10 +1037,251 @@ def main():
                 else:
                     st.info("No media content found for these users.")
             else:
-                st.info("No media content detected in this chat.")
+                st.info("No media content detected in this chat.")        # 7. Sentiment Analysis Tab
+        with tabs[6]:  # Use index 6 to access the Sentiment Analysis tab
+            st.header("Sentiment Analysis")
+            
+            # Sentiment analysis method selector
+            sentiment_method = st.selectbox(
+                "Select sentiment analysis method",
+                options=[
+                    "Combined (TextBlob + VADER)",
+                    "TextBlob",
+                    "VADER"
+                ],
+                index=0
+            )
+            
+            # Map the selection to method parameter
+            method_map = {
+                "TextBlob": "textblob",
+                "VADER": "vader",
+                "Combined (TextBlob + VADER)": "combined"
+            }
+            selected_method = method_map[sentiment_method]
+            
+            # Calculate sentiment statistics
+            with st.spinner("Analyzing sentiment in messages..."):
+                sentiment_stats = analyze_sentiment(df_filtered, method=selected_method)
+                sentiment_frames = sentiment_time_frames(df_filtered, method=selected_method)
+            
+            if not sentiment_stats:
+                st.warning("Not enough data for sentiment analysis.")
+            else:
+                # Overall sentiment metrics
+                st.subheader("Overall Chat Sentiment")
+                
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    avg_sentiment = sentiment_stats['average_sentiment']
+                    sentiment_color = "green" if avg_sentiment > 0.1 else "red" if avg_sentiment < -0.1 else "gray"
+                    st.metric("Average Sentiment", f"{avg_sentiment:.2f}", delta=None,
+                             delta_color="normal")
+                
+                with col2:
+                    # Positive percentage
+                    positive_pct = (sentiment_stats['sentiment_distribution'].get('Positive', 0) / 
+                                  sum(sentiment_stats['sentiment_distribution'].values()) * 100)
+                    st.metric("Positive Messages", f"{positive_pct:.1f}%")
+                
+                with col3:
+                    # Negative percentage
+                    negative_pct = (sentiment_stats['sentiment_distribution'].get('Negative', 0) / 
+                                  sum(sentiment_stats['sentiment_distribution'].values()) * 100)
+                    st.metric("Negative Messages", f"{negative_pct:.1f}%")
+                
+                # Sentiment distribution chart
+                st.subheader("Sentiment Distribution")
+                
+                # Convert to DataFrame for plotting
+                sentiment_dist_df = pd.DataFrame({
+                    'Category': list(sentiment_stats['sentiment_distribution'].keys()),
+                    'Count': list(sentiment_stats['sentiment_distribution'].values())
+                })
+                
+                fig = px.pie(
+                    sentiment_dist_df,
+                    values='Count',
+                    names='Category',
+                    title="Message Sentiment Distribution",
+                    color='Category',
+                    color_discrete_map={
+                        'Positive': '#00CC96', 
+                        'Neutral': '#636EFA',
+                        'Negative': '#EF553B'
+                    }
+                )
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Emotion distribution chart if available
+                if sentiment_stats.get('emotion_distribution'):
+                    st.subheader("Emotion Distribution")
+                    
+                    # Convert to DataFrame for plotting
+                    emotion_dist_df = pd.DataFrame({
+                        'Emotion': list(sentiment_stats['emotion_distribution'].keys()),
+                        'Count': list(sentiment_stats['emotion_distribution'].values())
+                    }).sort_values('Count', ascending=False)
+                    
+                    fig = px.bar(
+                        emotion_dist_df,
+                        x='Emotion',
+                        y='Count',
+                        title="Detected Emotions in Messages",
+                        color='Emotion'
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Sentiment Over Time
+                st.subheader("Sentiment Trends Over Time")
+                
+                # Sentiment category counts over time
+                if not sentiment_frames['category_counts'].empty:
+                    fig = px.area(
+                        sentiment_frames['category_counts'],
+                        title="Sentiment Categories Over Time",
+                        labels={'date': 'Date', 'value': 'Number of Messages', 'variable': 'Sentiment'},
+                        color_discrete_map={
+                            'Positive': '#00CC96', 
+                            'Neutral': '#636EFA',
+                            'Negative': '#EF553B'
+                        }
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # Average sentiment over time
+                if not sentiment_frames['average_by_date'].empty:
+                    fig = px.line(
+                        sentiment_frames['average_by_date'],
+                        x='date',
+                        y='sentiment',
+                        title="Average Sentiment Score Over Time",
+                        labels={'date': 'Date', 'sentiment': 'Sentiment Score (-1 to 1)'}
+                    )
+                    
+                    # Add a horizontal line at y=0
+                    fig.add_shape(
+                        type="line",
+                        x0=sentiment_frames['average_by_date']['date'].min(),
+                        y0=0,
+                        x1=sentiment_frames['average_by_date']['date'].max(),
+                        y1=0,
+                        line=dict(color="gray", width=1, dash="dash")
+                    )
+                    
+                    fig.update_layout(hovermode="x unified")
+                    st.plotly_chart(fig, use_container_width=True)
+                
+                # User Sentiment Comparison
+                st.subheader("User Sentiment Comparison")
+                
+                # Create DataFrame for user sentiment comparison
+                user_sentiment_df = pd.DataFrame({
+                    user: {
+                        'Average Score': data['average'],
+                        'Positive %': data['positive'],
+                        'Negative %': data['negative'],
+                        'Neutral %': data['neutral'],
+                        'Most Common Emotion': data['most_common_emotion']
+                    }
+                    for user, data in sentiment_stats['user_sentiments'].items()
+                }).T
+                
+                # Allow user to select which users to compare
+                compare_sentiment_users = st.multiselect(
+                    "Select users to compare (max 5)",
+                    options=list(sentiment_stats['user_sentiments'].keys()),
+                    default=list(sentiment_stats['user_sentiments'].keys())[:min(3, len(sentiment_stats['user_sentiments']))]
+                )
+                
+                if len(compare_sentiment_users) > 5:
+                    st.warning("Please select up to 5 users for comparison.")
+                    compare_sentiment_users = compare_sentiment_users[:5]
+                
+                if len(compare_sentiment_users) >= 1:
+                    # Filter the DataFrame for selected users
+                    filtered_user_sentiment = user_sentiment_df.loc[compare_sentiment_users]
+                    
+                    # Average sentiment score comparison
+                    fig = px.bar(
+                        filtered_user_sentiment,
+                        y=filtered_user_sentiment.index,
+                        x='Average Score',
+                        title="Average Sentiment Score by User",
+                        labels={'y': 'User', 'x': 'Sentiment Score (-1 to 1)'},
+                        color='Average Score',
+                        color_continuous_scale=[(0, "red"), (0.5, "gray"), (1, "green")],
+                        range_color=[-1, 1]
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Sentiment category percentage comparison
+                    sentiment_pct_df = pd.DataFrame({
+                        'User': np.repeat(filtered_user_sentiment.index, 3),
+                        'Category': np.tile(['Positive', 'Neutral', 'Negative'], len(filtered_user_sentiment)),
+                        'Percentage': np.concatenate([
+                            filtered_user_sentiment['Positive %'].values,
+                            filtered_user_sentiment['Neutral %'].values,
+                            filtered_user_sentiment['Negative %'].values
+                        ])
+                    })
+                    
+                    fig = px.bar(
+                        sentiment_pct_df,
+                        x='User',
+                        y='Percentage',
+                        color='Category',
+                        barmode='stack',
+                        title="Sentiment Category Distribution by User",
+                        labels={'User': 'User', 'Percentage': 'Percentage of Messages'},
+                        color_discrete_map={
+                            'Positive': '#00CC96', 
+                            'Neutral': '#636EFA',
+                            'Negative': '#EF553B'
+                        }
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+                    
+                    # Most common emotion by user
+                    fig = px.bar(
+                        filtered_user_sentiment,
+                        y=filtered_user_sentiment.index,
+                        x=[1] * len(filtered_user_sentiment),  # All bars same length
+                        title="Most Common Emotion by User",
+                        labels={'y': 'User'},
+                        color='Most Common Emotion',
+                        orientation='h',
+                        text='Most Common Emotion'
+                    )
+                    fig.update_traces(textposition='inside', textangle=0)
+                    fig.update_layout(showlegend=True)
+                    fig.update_xaxes(showticklabels=False)  # Hide x axis labels
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.info("Please select at least one user for sentiment comparison.")
 
-        # 7. Chat Patterns Tab - replace the tabs.append code with a proper tab access
-        with tabs[6]:  # Use index 6 to access the Chat Patterns tab
+                # Add an explanation of the sentiment analysis methodology
+                with st.expander("About Sentiment Analysis Methodology"):
+                    st.markdown("""
+                    ### Sentiment Analysis Methods
+                    
+                    This analyzer offers three sentiment analysis methods:
+                    
+                    1. **Combined (TextBlob + VADER)**: Uses both TextBlob and VADER sentiment analyzers with weighted averaging for more reliable results.
+                    2. **TextBlob**: Uses TextBlob's pattern-based sentiment analysis which excels at grammatical text.
+                    3. **VADER**: (Valence Aware Dictionary and sEntiment Reasoner) is specifically tuned for social media content and handles emojis, slang, and informal language better.
+                    
+                    #### Sentiment Categories
+                    - **Positive**: Score > 0.15
+                    - **Negative**: Score < -0.1
+                    - **Neutral**: Score between -0.1 and 0.15
+                    
+                    #### Emotion Detection
+                    Emotions are detected using a combination of keyword matching and sentiment analysis.
+                    """)
+            
+        # 8. Chat Patterns Tab
+        with tabs[7]:  # Now use index 7 to access the Chat Patterns tab
             st.header("Chat Patterns Analysis")
 
             # Response time analysis
