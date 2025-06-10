@@ -3,3 +3,8 @@ matplotlib
 nltk
 wordcloud
 emoji
+pandas
+numpy
+streamlit
+textblob
+vaderSentiment
