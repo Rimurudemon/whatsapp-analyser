@@ -251,7 +251,7 @@ def analyze_media(df):
         'media_per_user': media_per_user
     }
 
-def sentiment_analysis(text, method="combined"):
+def sentiment_analysis(text, method="textblob"):
     """
     Perform sentiment analysis on a given text using multiple methods
     
@@ -585,11 +585,11 @@ def main():
                 format_func=lambda x: x[0]
             )[1]
             
-            days_to_analyze = st.slider(
+            days_to_analyze = st.number_input(
                 "Days to analyze (most recent)",
                 min_value=7,
-                max_value=365,
-                value=30
+                max_value=500,
+                value=30,
             )
     
     # Main content
@@ -1037,7 +1037,9 @@ def main():
                 else:
                     st.info("No media content found for these users.")
             else:
-                st.info("No media content detected in this chat.")        # 7. Sentiment Analysis Tab
+                st.info("No media content detected in this chat.")        
+                
+        # 7. Sentiment Analysis Tab
         with tabs[6]:  # Use index 6 to access the Sentiment Analysis tab
             st.header("Sentiment Analysis")
             
@@ -1049,7 +1051,7 @@ def main():
                     "TextBlob",
                     "VADER"
                 ],
-                index=0
+                index=1
             )
             
             # Map the selection to method parameter
