@@ -291,7 +291,7 @@ def query_db(question: str, db) -> str:
     return "\n\n" + "\n\n".join(context_pieces) + "\n\n"
 
 # ---------------------- Enhanced Gemini Q&A ----------------------
-def qa_with_gemini(context: str, question: str, model) -> str:
+def qa_with_gemini(context: str, question: str, model, chat_history=None) -> str:
     """
     Generate an answer to the user's question using Gemini AI
     
@@ -299,6 +299,7 @@ def qa_with_gemini(context: str, question: str, model) -> str:
     context (str): Retrieved context from relevant messages
     question (str): User's question
     model: Gemini model instance
+    chat_history (list): Optional previous Q&A exchanges
     
     Returns:
     str: Gemini's answer based on the context
@@ -320,7 +321,8 @@ def qa_with_gemini(context: str, question: str, model) -> str:
     system_prompt = """
     You are an AI assistant that helps analyze WhatsApp chat conversations.
     You will be given context from a WhatsApp chat that includes conversation threads (not just individual messages), 
-    overall chat statistics, and a question about it.
+    overall chat statistics, and a question about it. You may also have access to previous questions and answers
+    in the conversation.
     
     Follow these guidelines:
     1. Base your answers primarily on the provided conversation contexts
@@ -331,6 +333,8 @@ def qa_with_gemini(context: str, question: str, model) -> str:
     6. Include specific examples and quotes from the messages when relevant
     7. Format dates and times consistently
     8. When referring to conversations, mention both the date and participants involved
+    9. Consider previous questions and answers when responding to follow-up questions
+    10. Keep your responses concise and focused on answering the specific question
     
     Context is formatted with multiple conversation segments, each containing several messages 
     that provide context around a central message.
@@ -338,8 +342,19 @@ def qa_with_gemini(context: str, question: str, model) -> str:
     Your response must not only quote the context but also synthesize it into a coherent answer.
     """
     
+    # Format previous conversation history if available
+    conversation_history = ""
+    if chat_history and len(chat_history) > 0:
+        conversation_history = "Previous conversation:\n"
+        # Include up to 3 previous exchanges for context (excluding the current one)
+        for i, entry in enumerate(chat_history[-3:]):
+            conversation_history += f"Question {i+1}: {entry['question']}\n"
+            conversation_history += f"Answer {i+1}: {entry['answer']}\n\n"
+    
     user_prompt = f"""
     {insights_summary}
+    
+    {conversation_history}
     
     Context from WhatsApp Chat:
     {context}
