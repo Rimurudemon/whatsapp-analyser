@@ -1,24 +1,21 @@
-plotly==5.18.0
-matplotlib==3.8.2
-nltk==3.8.1
-wordcloud==1.9.2
-emoji==2.8.0
-pandas==2.1.3
-numpy==1.26.2
-streamlit==1.29.0
-textblob==0.17.1
-vaderSentiment==3.3.2
-indic-transliteration==2.3.46
-# indic-translator is not available in PyPI, will need manual installation
-# indic-translator==0.1.6
-transformers==4.35.2
-tqdm==4.66.1
-
-# RAG system dependencies
-langchain==0.1.4
-langchain-core==0.1.16
-langchain-community==0.0.14
-faiss-cpu==1.7.4
-sentence-transformers==2.3.1
-google-generativeai==0.3.1
-python-dotenv==1.0.0
+plotly
+matplotlib
+nltk
+wordcloud
+emoji
+pandas
+numpy
+streamlit
+textblob
+vaderSentiment
+transformers
+tqdm
+langchain
+langchain-core
+langchain-community
+faiss-cpu
+sentence-transformers
+google-generativeai
+python-dotenv
+google-transliteration-api
+aksharamukha
