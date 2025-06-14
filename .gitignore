@@ -1,0 +1,5 @@
+#add the folder faiss_chat_enhanced
+faiss_chat_enhanced/
+# Ignore Python cache files
+__pycache__/
+.env

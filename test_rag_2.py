@@ -12,6 +12,7 @@ from google.generativeai import GenerativeModel, configure
 from langchain_core.documents import Document
 from dotenv import load_dotenv
 
+
 # Load environment variables from .env file
 load_dotenv()
 # ---------------------- Configuration ----------------------
